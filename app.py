@@ -4,7 +4,6 @@ import sqlite3
 import pandas as pd
 import re
 from flask import Flask, render_template, request, jsonify
-from flask_cors import CORS
 import google.generativeai as genai
 import plotly.graph_objs as go
 import plotly.utils
@@ -14,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+
 
 # --- UPDATED SYSTEM PROMPT ---
 SYSTEM_PROMPT = """Role: Nykaa BI Data Architect. 
