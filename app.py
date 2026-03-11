@@ -10,37 +10,41 @@ import plotly.graph_objs as go
 import plotly.utils
 from dotenv import load_dotenv
 
-# Load API Key from .env file
+# Load API Key from .env
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# --- SYSTEM PROMPT ---
+# --- UPDATED SYSTEM PROMPT ---
 SYSTEM_PROMPT = """Role: Nykaa BI Data Architect. 
 Table: campaign_data
-Columns: Campaign_ID, Campaign_Type, Target_Audience, Duration, Channel_Used, Impressions, Clicks, Leads, Conversions, Revenue, Acquisition_Cost, ROI, Language, Engagement_Score, Customer_Segment, Date (YYYY-MM-DD).
+Columns: Campaign_ID, Campaign_Type, Target_Audience, Duration, Channel_Used, Impressions, Clicks, Leads, Conversions, Revenue, Acquisition_Cost, ROI, Language, Engagement_Score, Customer_Segment, Date (stored as YYYY-MM-DD).
 
 Instructions:
 1. Use SQLite syntax.
-2. For time-series, use strftime('%Y-%m', Date).
-3. Identify if the user wants to change the visualization type.
+2. For trends/time-series, use 'Date' for the x-axis. 
+3. If the user asks for "Trend", "Over time", or "Monthly", set chart_type to "line".
 4. Return ONLY JSON with keys: analysis, sql, chart_type, chart_config (x_axis, y_axis).
 """
 
 def init_database():
-    """Load the Nykaa dataset into SQLite."""
+    """Load Nykaa CSV and strictly format dates for Line Charts."""
     if not os.path.exists('cleaned_nykaa_data.csv'):
         print("Error: cleaned_nykaa_data.csv not found.")
         return
     
     df = pd.read_csv('cleaned_nykaa_data.csv')
-    # Force Date to YYYY-MM-DD format
+    
+    # CRITICAL: Convert DD-MM-YYYY to YYYY-MM-DD so SQLite can sort and group dates
     df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
     
+    # Remove any rows where date conversion failed
+    df = df.dropna(subset=['Date'])
+
     with sqlite3.connect('bi_database.db') as conn:
         df.to_sql('campaign_data', conn, if_exists='replace', index=False)
-        print("Nykaa Data Loaded Successfully.")
+        print("Database Synced: Dates formatted for Line Charts.")
 
 def execute_sql_query(sql_query):
     try:
@@ -58,7 +62,6 @@ def get_llm_response(user_query, history=None):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # Start chat with history
         chat = model.start_chat(history=history if history else [])
         
         response = chat.send_message(
@@ -74,29 +77,38 @@ def create_chart(data, chart_type, config):
     try:
         ct = str(chart_type).lower()
         cols = list(data[0].keys())
+        
+        # Determine X and Y axes
         x = config.get('x_axis') if config.get('x_axis') in cols else cols[0]
         y = config.get('y_axis') if config.get('y_axis') in cols else (cols[1] if len(cols) > 1 else cols[0])
 
         x_vals = [r[x] for r in data]
         y_vals = [r[y] for r in data]
 
+        # Chart Logic
         if 'pie' in ct:
             fig = go.Figure(data=[go.Pie(labels=x_vals, values=y_vals)])
-        elif 'line' in ct:
-            fig = go.Figure(data=[go.Scatter(x=x_vals, y=y_vals, mode='lines+markers')])
+        elif 'line' in ct or 'trend' in ct:
+            # Line charts need sorted X-axis (dates) to look correct
+            combined = sorted(zip(x_vals, y_vals))
+            x_sorted, y_sorted = zip(*combined)
+            fig = go.Figure(data=[go.Scatter(x=x_sorted, y=y_sorted, mode='lines+markers', line=dict(color='#2563eb'))])
         elif 'area' in ct:
             fig = go.Figure(data=[go.Scatter(x=x_vals, y=y_vals, fill='tonexty')])
-        elif 'scatter' in ct:
-            fig = go.Figure(data=[go.Scatter(x=x_vals, y=y_vals, mode='markers')])
         else: # Default Bar
-            fig = go.Figure(data=[go.Bar(x=x_vals, y=y_vals)])
+            fig = go.Figure(data=[go.Bar(x=x_vals, y=y_vals, marker_color='#3b82f6')])
 
-        fig.update_layout(template='plotly_white', margin=dict(l=20, r=20, t=40, b=20))
+        fig.update_layout(
+            template='plotly_white', 
+            margin=dict(l=20, r=20, t=40, b=20),
+            hovermode="x unified"
+        )
         return json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
     except: return None
 
 @app.route('/')
-def index(): return render_template('index.html')
+def index(): 
+    return render_template('index.html')
 
 @app.route('/query', methods=['POST'])
 def handle_query():
