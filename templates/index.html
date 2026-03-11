@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nykaa BI | Executive Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .glass { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); }
+        .sidebar-dark { background-color: #0f172a; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+
+    <aside class="w-64 sidebar-dark text-slate-300 flex flex-col p-6 shadow-2xl">
+        <h1 class="text-white text-xl font-bold mb-8 flex items-center gap-2"><span>📊</span> Nykaa BI</h1>
+        <nav class="flex-1 space-y-4">
+            <p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Quick Insights</p>
+            <button onclick="setQuery('Show ROI by Campaign Type')" class="w-full text-left text-sm hover:text-white transition">📈 ROI by Type</button>
+            <button onclick="setQuery('Show monthly Revenue trend')" class="w-full text-left text-sm hover:text-white transition">📅 Revenue Trends</button>
+            <button onclick="setQuery('Top 5 languages by Conversions')" class="w-full text-left text-sm hover:text-white transition">🌐 Language Performance</button>
+        </nav>
+        <button onclick="clearDashboard()" class="mt-auto py-2 border border-slate-700 rounded text-xs hover:bg-red-500/10 hover:text-red-400 transition">CLEAR DASHBOARD</button>
+    </aside>
+
+    <main class="flex-1 flex flex-col relative bg-slate-50">
+        <header class="h-16 border-b glass px-8 flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">Architect Pro v2.0</span>
+            <div id="status" class="text-xs text-green-500">● Online</div>
+        </header>
+
+        <section id="content" class="flex-1 overflow-y-auto p-8 pb-32 space-y-6">
+            <div id="welcome" class="text-center py-20">
+                <h2 class="text-3xl font-bold text-slate-800">Ready for Analysis</h2>
+                <p class="text-slate-500 mt-2">Ask a marketing question to begin.</p>
+            </div>
+
+            <div id="analysisBox" class="hidden glass p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h3 class="text-blue-600 font-bold text-xs uppercase mb-2">AI Summary</h3>
+                <p id="analysisText" class="text-lg text-slate-700 font-medium"></p>
+            </div>
+
+            <div id="resultsGrid" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="glass p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 class="text-slate-400 font-bold text-xs uppercase mb-4">Visualization</h3>
+                    <div id="chart" class="h-80"></div>
+                </div>
+                <div class="glass p-6 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <h3 class="text-slate-400 font-bold text-xs uppercase mb-4">Data Preview</h3>
+                    <div class="overflow-x-auto h-80"><table id="table" class="w-full text-xs text-left"></table></div>
+                </div>
+            </div>
+
+            <div id="sqlBox" class="hidden glass p-4 rounded-xl border border-slate-200">
+                <h3 class="text-slate-400 font-bold text-xs uppercase mb-2">SQL Query</h3>
+                <pre id="sql" class="text-[10px] font-mono text-slate-500 bg-slate-50 p-2 rounded"></pre>
+            </div>
+        </section>
+
+        <div class="absolute bottom-0 w-full p-8 pointer-events-none">
+            <div class="max-w-4xl mx-auto glass shadow-2xl rounded-2xl p-2 flex gap-2 border border-blue-100 pointer-events-auto ring-4 ring-blue-500/5">
+                <input type="text" id="queryInput" placeholder="Ask a question or a follow-up..." class="flex-1 bg-transparent px-4 outline-none text-slate-700">
+                <button onclick="submitQuery()" class="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition">ANALYZE</button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let chatHistory = [];
+
+        function setQuery(q) { 
+            document.getElementById('queryInput').value = q;
+            submitQuery();
+        }
+
+        function clearDashboard() {
+            chatHistory = [];
+            location.reload();
+        }
+
+        async function submitQuery() {
+            const input = document.getElementById('queryInput');
+            const query = input.value;
+            if(!query) return;
+
+            document.getElementById('welcome').classList.add('hidden');
+            document.getElementById('status').innerText = '○ Processing...';
+
+            try {
+                const res = await fetch('/query', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ query, history: chatHistory })
+                });
+                
+                const data = await res.json();
+                
+                if(data.error) return alert(data.error);
+
+                // Show Cards
+                document.getElementById('analysisBox').classList.remove('hidden');
+                document.getElementById('resultsGrid').classList.remove('hidden');
+                document.getElementById('sqlBox').classList.remove('hidden');
+
+                document.getElementById('analysisText').innerText = data.analysis;
+                document.getElementById('sql').innerText = data.sql;
+
+                if(data.chart) {
+                    const p = JSON.parse(data.chart);
+                    Plotly.newPlot('chart', p.data, p.layout, {responsive: true});
+                }
+
+                // Table
+                if(data.data.length > 0) {
+                    const cols = Object.keys(data.data[0]);
+                    let html = `<thead class="bg-slate-100"><tr>${cols.map(c => `<th class="p-2">${c}</th>`).join('')}</tr></thead>`;
+                    html += `<tbody>${data.data.slice(0, 10).map(r => `<tr>${cols.map(c => `<td class="p-2 border-b">${r[c]}</td>`).join('')}</tr>`).join('')}</tbody>`;
+                    document.getElementById('table').innerHTML = html;
+                }
+
+                // IMPORTANT: Update history with the correct schema for Gemini
+                chatHistory.push({ role: "user", parts: [{ text: query }] });
+                chatHistory.push({ role: "model", parts: [{ text: data.analysis }] });
+
+            } finally {
+                document.getElementById('status').innerText = '● Online';
+                input.value = '';
+            }
+        }
+    </script>
+</body>
+</html>
